@@ -1,3 +1,6 @@
 1. mhsin cjkwidth patch (included after screen 4.1)
 http://savannah.gnu.org/bugs/?16666
 patch < patch-cjkwidth
+
+2. UAO Big5 range
+patch < patch-uao-range
