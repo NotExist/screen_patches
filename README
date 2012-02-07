@@ -4,3 +4,6 @@ patch < patch-cjkwidth
 
 2. UAO Big5 range
 patch < patch-uao-range
+
+3. screen table UAO update
+perl conv.pl <big5uni.txt >/usr/share/screen/utf8encodings/18
