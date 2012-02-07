@@ -1,0 +1,340 @@
+diff -ur ___ansi.c ansi.c
+--- ___ansi.c	Wed Mar 31 00:29:37 2004
++++ ansi.c	Wed Mar 31 00:29:55 2004
+@@ -306,7 +306,7 @@
+   cols = curr->w_width;
+   rows = curr->w_height;
+ 
+-  if (curr->w_silence)
++  if (curr->w_silence && curr->w_antiidle_str[0] == '\0')
+     SetTimeout(&curr->w_silenceev, curr->w_silencewait * 1000);
+ 
+   if (curr->w_monitor == MON_ON)
+diff -ur ___comm.c comm.c
+--- ___comm.c	Mon Sep  8 22:25:08 2003
++++ comm.c	Wed Mar 31 00:29:55 2004
+@@ -53,6 +53,7 @@
+ #endif
+   { "allpartial",	NEED_DISPLAY|ARGS_1 },
+   { "altscreen",	ARGS_01 },
++  { "antiidle_str",	NEED_FORE | ARGS_01 },
+   { "at",		NEED_DISPLAY|ARGS_2|ARGS_ORMORE },
+ #ifdef COLOR
+   { "attrcolor",	ARGS_12 },
+@@ -124,6 +125,7 @@
+   { "crlf",		ARGS_01 },
+ #endif
+   { "debug",		ARGS_01 },
++  { "defantiidle_str",	ARGS_01 },
+ #ifdef AUTO_NUKE
+   { "defautonuke",	ARGS_1 },
+ #endif
+@@ -278,7 +280,7 @@
+   { "setsid",		ARGS_1 },
+   { "shell",		ARGS_1 },
+   { "shelltitle",	ARGS_1 },
+-  { "silence",		NEED_FORE|ARGS_01 },
++  { "silence",		NEED_FORE|ARGS_012 },
+   { "silencewait",	ARGS_1 },
+   { "sleep",		ARGS_1 },
+   { "slowpaste",	NEED_FORE|ARGS_01 },
+diff -ur ___process.c process.c
+--- ___process.c	Thu Sep 18 20:53:54 2003
++++ process.c	Wed Mar 31 00:29:55 2004
+@@ -89,6 +89,7 @@
+ #ifdef POW_DETACH
+ extern char *BufferFile, *PowDetachString;
+ #endif
++extern char *AntiidleString;
+ #ifdef MULTIUSER
+ extern struct acluser *EffectiveAclUser;	/* acl.c */
+ #endif
+@@ -1018,6 +1019,94 @@
+   return i;
+ }
+ 
++void ParseStr(char dst[], char src[], int maxl)
++{
++  char *sp, *sp2;
++  char *dp;
++  unsigned long ul;
++  char c;
++  int sl;
++  int pre, base, nl;
++  int backslash = 0;
++  
++  sp = src;
++  dp = dst;
++  sl = strlen(src);
++  while(*sp != '\0' && (int)(dp - dst) < maxl)
++  {
++    if(!backslash)
++    {
++      if(*sp == '\\')
++      {
++        backslash = 1;
++        sp ++;
++      }
++      else
++        *(dp ++) = *(sp ++);
++    }
++    else
++    {
++      switch(*sp)
++      {
++        case '\\':
++          *(dp ++) = '\\';
++          break;
++        case 'a':
++          *(dp ++) = '\a';
++          break;
++        case 'b':
++          *(dp ++) = '\b';
++          break;
++        case 'f':
++          *(dp ++) = '\f';
++          break;
++        case 'n':
++          *(dp ++) = '\n';
++          break;
++        case 'r':
++          *(dp ++) = '\r';
++          break;
++        case 't':
++          *(dp ++) = '\t';
++          break;
++        case 'v':
++          *(dp ++) = '\v';
++          break;
++        case '\'':
++          *(dp ++) = '\'';
++          break;
++        case '"':
++          *(dp ++) = '"';
++          break;
++        default:
++          if(*sp == 'x')  /* base 16, 2 digits max */
++            pre = 1, base = 16, nl = 2;
++          else if(*sp >= '0' && *sp <= '9')  /* base 8, 3 digits max */
++            pre = 0, base = 8, nl = 3;
++          else
++            break;
++          
++          sp += pre;
++          if((int)(sp - src) + nl > sl)
++            nl = sl - (int)(sp - src);
++          c = *(sp + nl);
++          *(sp + nl) = '\0';
++          if((ul = strtoul(sp, &sp2, base)), sp2 > sp)
++            *(dp ++) = (char)ul;
++          else
++            sp2 = sp - pre;
++          *(sp + nl) = c;
++          sp = sp2 - 1;
++          break;
++      }
++      sp ++;
++      backslash = 0;
++    }
++  }
++  *dp = '\0';
++  dst[maxl - 1] = '\0';
++}
++
+ /*ARGSUSED*/
+ void
+ DoAction(act, key)
+@@ -2794,13 +2883,61 @@
+ 	  WindowChanged((struct win *)0, 0);
+ 	}
+       break;
++    case RC_DEFANTIIDLE_STR:
++      if(argc == 1 && args[0] != NULL)
++      {
++        char buf[MAXSTR];
++        
++        ParseStr(buf, args[0], MAXSTR);
++        if(AntiidleString != NULL)
++          free(AntiidleString);
++        AntiidleString = SaveStr(buf);
++      }
++      else if(AntiidleString != NULL)
++      {
++        free(AntiidleString);
++        AntiidleString = NULL;
++      }
++      break;
++    case RC_ANTIIDLE_STR:
++      if(argc == 1 && args[0] != NULL)
++      {
++        ParseStr(fore->w_antiidle_str, args[0], MAXSTR);
++        Msg(0, "Set antiidle_str.");
++      }
++      else if(fore->w_silence)
++      {
++        fore->w_antiidle_str[0] = '\0';
++        SetTimeout(&fore->w_silenceev, fore->w_silencewait * 1000);
++        evenq(&fore->w_silenceev);
++
++        if (!msgok)
++          break;
++        Msg(0, "The window is now being monitored for %d sec. silence.", fore->w_silencewait);
++      }
++      else
++      {
++        fore->w_antiidle_str[0] = '\0';
++        Msg(0, "Unset antiidle_str.");
++      }
++      break;
+     case RC_SILENCE:
+       n = fore->w_silence != 0;
+       i = fore->w_silencewait;
++      if(argc == 2 && args[1] != NULL && args[1][0] != '\0')
++      {
++        ParseStr(fore->w_antiidle_str, args[1], MAXSTR);
++      }
+       if (args[0] && (args[0][0] == '-' || (args[0][0] >= '0' && args[0][0] <= '9')))
+         {
++          s = args[1];
++          args[1] = NULL;
+ 	  if (ParseNum(act, &i))
++	  {
++	    args[1] = s;
+ 	    break;
++	  }
++	  args[1] = s;
+ 	  n = i > 0;
+ 	}
+       else if (ParseSwitch(act, &n))
+@@ -2821,7 +2958,10 @@
+ 
+ 	  if (!msgok)
+ 	    break;
+-	  Msg(0, "The window is now being monitored for %d sec. silence.", fore->w_silencewait);
++	  if(fore->w_antiidle_str[0] == '\0')
++	    Msg(0, "The window is now being monitored for %d sec. silence.", fore->w_silencewait);
++          else
++	    Msg(0, "The window is now being monitored for %d sec. anti-idle.", fore->w_silencewait);
+ 	}
+       else
+         {
+@@ -2843,7 +2983,10 @@
+ 	    }
+ 	  if (!msgok)
+ 	    break;
+-	  Msg(0, "The window is no longer being monitored for silence.");
++	  if(fore->w_antiidle_str[0] == '\0')
++	    Msg(0, "The window is no longer being monitored for silence.");
++          else
++	    Msg(0, "The window is no longer being monitored for anti-idle.");
+ 	}
+       break;
+ #ifdef COPY_PASTE
+@@ -4467,7 +4610,7 @@
+ #ifdef MULTIUSER
+ 	  ReleaseAutoWritelock(display, p);
+ #endif
+-	  if (p->w_silence)
++	  if (p->w_silence && p->w_antiidle_str[0] == '\0')
+ 	    {
+ 	      SetTimeout(&p->w_silenceev, p->w_silencewait * 1000);
+ 	      evenq(&p->w_silenceev);
+diff -ur ___screen.c screen.c
+--- ___screen.c	Mon Sep  8 22:26:41 2003
++++ screen.c	Wed Mar 31 00:29:55 2004
+@@ -190,6 +190,7 @@
+ #ifdef POW_DETACH
+ char *PowDetachString;
+ #endif
++char *AntiidleString;
+ char *hstatusstring;
+ char *captionstring;
+ char *timestring;
+@@ -447,6 +448,7 @@
+ #ifdef POW_DETACH
+   PowDetachString = 0;
+ #endif
++  AntiidleString = NULL;
+   default_startup = (ac > 1) ? 0 : 1;
+   adaptflag = 0;
+   VBellWait = VBELLWAIT * 1000;
+diff -ur ___window.c window.c
+--- ___window.c	Fri Dec  5 21:45:41 2003
++++ window.c	Wed Mar 31 00:30:02 2004
+@@ -60,6 +60,7 @@
+ extern char *zmodem_sendcmd;
+ extern char *zmodem_recvcmd;
+ #endif
++extern char *AntiidleString;
+ 
+ #if defined(TIOCSWINSZ) || defined(TIOCGWINSZ)
+ extern struct winsize glwz;
+@@ -241,6 +242,8 @@
+   int l2 = 0, f, *ilen, l = *lenp, trunc;
+   char *ibuf;
+ 
++  if (fore->w_silence && fore->w_antiidle_str[0] != '\0' && !InInput())
++    SetTimeout(&fore->w_silenceev, fore->w_silencewait * 1000);
+   debug1("WinProcess: %d bytes\n", *lenp);
+   fore = (struct win *)flayer->l_data;
+ 
+@@ -668,6 +671,13 @@
+    */
+   p->w_silence = nwin.silence;
+   p->w_silencewait = SilenceWait;
++  if(AntiidleString == NULL)
++    p->w_antiidle_str[0] = '\0';
++  else
++  {
++    strncpy(p->w_antiidle_str, AntiidleString, MAXSTR);
++    p->w_antiidle_str[MAXSTR - 1] = '\0';
++  }
+ #ifdef MULTIUSER
+   if (p->w_silence == SILENCE_ON)
+     {
+@@ -1989,8 +1999,32 @@
+       if (!(ACLBYTE(p->w_lio_notify, D_user->u_id) & ACLBIT(D_user->u_id)))
+ 	continue;
+ #endif
+-      Msg(0, "Window %d: silence for %d seconds", p->w_number, p->w_silencewait);
++      if(p->w_antiidle_str[0] == '\0')
++        Msg(0, "Window %d: silence for %d seconds", p->w_number, p->w_silencewait);
++      else
++        Msg(0, "Window %d: idle for %d seconds, send antiidle_str", p->w_number, p->w_silencewait);
+     }
++  if(p->w_antiidle_str[0] != '\0')
++  {
++    struct paster *pa;
++    struct win *old_fore;
++    struct layer *old_flayer;
++    
++    pa = &p->w_paster;
++    FreePaster(pa);
++    pa->pa_pasteptr = p->w_antiidle_str;
++    pa->pa_pastelen = strlen(p->w_antiidle_str);
++    pa->pa_pastelayer = &p->w_layer;
++    old_fore = fore;
++    old_flayer = flayer;
++    fore = p;
++    flayer = &p->w_layer;
++    DoProcess(p, &pa->pa_pasteptr, &pa->pa_pastelen, pa);
++    fore = old_fore;
++    flayer = old_flayer;
++    SetTimeout(&p->w_silenceev, p->w_silencewait * 1000);
++    evenq(&p->w_silenceev);
++  }
+ }
+ 
+ #ifdef ZMODEM
+diff -ur ___window.h window.h
+--- ___window.h	Thu Aug 21 22:57:30 2003
++++ window.h	Wed Mar 31 00:29:55 2004
+@@ -273,6 +273,8 @@
+   struct mline *w_alt_hlines;
+   int    w_alt_histidx;
+ #endif
++
++  char   w_antiidle_str[MAXSTR];
+ };
+ 
+ 

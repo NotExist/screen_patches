@@ -11,3 +11,7 @@ perl conv.pl <big5uni.txt >/usr/share/screen/utf8encodings/18
 4. command line assign Big5/GBK
 http://sunpoet.net/FreeBSD/screen-big5-gbk
 patch < patch-big5-gbk-parameter
+
+5. antiidle
+http://www.mhsin.org/screen/files/screen.patch-for-4.0.2
+patch < patch-antiidle
