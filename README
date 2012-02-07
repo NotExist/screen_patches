@@ -15,3 +15,8 @@ patch < patch-big5-gbk-parameter
 5. antiidle
 http://www.mhsin.org/screen/files/screen.patch-for-4.0.2
 patch < patch-antiidle
+
+Ref:
+http://electronic-blue.wikidot.com/doc:screen-uao
+http://tib.tw/tBoard/index.py?m=pl&t=564
+http://blog.bsdchat.com/2008/04/cjkwidth-on-screen.html
